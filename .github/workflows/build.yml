@@ -25,7 +25,12 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Generate Android project & Force compileSdk 36
+      - name: Install Android SDK 36
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0" || true
+
+      - name: Generate Android project & Install dependencies
         run: |
           cp pubspec.yaml pubspec_backup.yaml
           cp lib/main.dart main_backup.dart
@@ -37,28 +42,25 @@ jobs:
           cp main_backup.dart lib/main.dart
           rm pubspec_backup.yaml main_backup.dart
 
-          # إجبار ملف build.gradle (Groovy) على استخدام compileSdk 36 و minSdk 24
-          if [ -f "android/app/build.gradle" ]; then
-            sed -i 's/^[[:space:]]*compileSdk.*/        compileSdk 36/g' android/app/build.gradle
-            sed -i 's/^[[:space:]]*minSdk.*/        minSdk 24/g' android/app/build.gradle
-            sed -i 's/^[[:space:]]*targetSdk.*/        targetSdk 35/g' android/app/build.gradle
-          fi
+          # تحميل المكتبات أولاً لتعديل إعداداتها أيضاً
+          flutter pub get
 
-          # إجبار ملف build.gradle.kts (Kotlin) على استخدام compileSdk = 36 و minSdk = 24
-          if [ -f "android/app/build.gradle.kts" ]; then
-            sed -i 's/^[[:space:]]*compileSdk.*/    compileSdk = 36/g' android/app/build.gradle.kts
-            sed -i 's/^[[:space:]]*minSdk.*/        minSdk = 24/g' android/app/build.gradle.kts
-            sed -i 's/^[[:space:]]*targetSdk.*/        targetSdk = 35/g' android/app/build.gradle.kts
-          fi
+          # إجبار التطبيق وجميع المكتبات الخارجية (Plugins) على استخدام compileSdk 36 و minSdk 24
+          find android ~/.pub-cache -name "build.gradle*" -type f -exec sed -i 's/flutter\.compileSdkVersion/36/g' {} +
+          find android ~/.pub-cache -name "build.gradle*" -type f -exec sed -i 's/compileSdkVersion [0-9][0-9]/compileSdkVersion 36/g' {} +
+          find android ~/.pub-cache -name "build.gradle*" -type f -exec sed -i 's/compileSdk = [0-9][0-9]/compileSdk = 36/g' {} +
+          find android ~/.pub-cache -name "build.gradle*" -type f -exec sed -i 's/compileSdk [0-9][0-9]/compileSdk 36/g' {} +
+          find android -name "build.gradle*" -type f -exec sed -i 's/flutter\.minSdkVersion/24/g' {} +
+          find android -name "build.gradle*" -type f -exec sed -i 's/flutter\.targetSdkVersion/35/g' {} +
+
+          # السماح باستخدام SDK 36 بدون تحذيرات في Gradle
+          echo "android.suppressUnsupportedCompileSdk=36" >> android/gradle.properties
 
           # إضافة صلاحيات الإنترنت وقراءة الفيديو في AndroidManifest.xml
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
             sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"\/>\n    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"\/>\n    <application/g' "$MANIFEST"
           fi
-
-      - name: Install dependencies
-        run: flutter pub get
 
       - name: Build Release APK
         run: flutter build apk --release --obfuscate --split-debug-info=build/symbols --no-tree-shake-icons
